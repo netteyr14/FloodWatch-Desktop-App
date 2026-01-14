@@ -8,7 +8,7 @@ import '../widgets/curved_header.dart';
 import '../widgets/action_button.dart';
 
 /// Same backend + routes as other dashboards
-const String _apiBaseUrl = "http://192.168.1.8";
+const String _apiBaseUrl = "http://192.168.1.6:8700";
 
 class OperationsDashboardScreen extends StatelessWidget {
   const OperationsDashboardScreen({super.key});
@@ -238,7 +238,7 @@ class _NodesManagementSection extends StatelessWidget {
                           ),
                           SizedBox(width: 6),
                           Text(
-                            '2',
+                            '6',
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w800,
