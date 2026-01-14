@@ -22,7 +22,7 @@ class _LoginScreenState extends State<LoginScreen> {
   String? _error;
   bool _isLoading = false;
 
-  static const String _baseUrl = 'http://192.168.1.2';
+  static const String _baseUrl = 'http://192.168.1.6:8700';
 
   @override
   void initState() {

@@ -11,7 +11,7 @@ import '../widgets/curved_header.dart';
 import '../widgets/metric_card.dart';
 
 /// Backend base URL
-const String _apiBaseUrl = "http://192.168.1.2";
+const String _apiBaseUrl = "http://192.168.1.6:8700";
 
 class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
@@ -38,6 +38,15 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Timer? _clockTimer;
   DateTime _now = DateTime.now();
+
+
+double? _meteoTemp;
+double? _meteoHumidity;
+double? _meteoRain;
+double? _meteoPressure;
+
+bool _loadingMeteo = false;
+String? _meteoError;
 
   @override
   void initState() {
@@ -95,7 +104,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       });
 
       if (_selected != null) {
-        await _fetchForecast(_selected!.nodeName);
+        await _fetchForecastById(
+  _selected!.nodeId,
+  _selected!.siteId,
+);
+await _fetchOpenMeteo(_selected!.lat, _selected!.lng);
       }
     } catch (e) {
       setState(() {
@@ -133,7 +146,10 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
       });
 
       if (_selected != null) {
-        await _fetchForecast(_selected!.nodeName);
+        await _fetchForecastById(
+  _selected!.nodeId,
+  _selected!.siteId,
+);
       }
     } catch (_) {
       // silent fail
@@ -144,54 +160,98 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   // FETCH FORECAST (1hr + 1mth share same value)
   // --------------------------------------------------------------------------
 
-  Future<void> _fetchForecast(String nodeName) async {
-    setState(() {
-      _loadingForecast = true;
-      _forecastError = null;
-    });
+  Future<void> _fetchForecastById(int nodeId, int siteId) async {
+  setState(() {
+    _loadingForecast = true;
+    _forecastError = null;
+  });
 
-    try {
-      final uri = Uri.parse(
-        "$_apiBaseUrl/node/${Uri.encodeComponent(nodeName)}/prediction",
-      );
-      final res = await http.get(uri);
+  try {
+    final uri = Uri.parse(
+      "$_apiBaseUrl/node/id/$nodeId/prediction?site_id=$siteId",
+    );
 
-      if (res.statusCode == 404) {
-        setState(() {
-          _forecastValue = null;
-          _forecastTimestamp = null;
-          _loadingForecast = false;
-          _forecastError = "No prediction available";
-        });
-        return;
-      }
+    final res = await http.get(uri);
 
-      if (res.statusCode != 200) {
-        throw Exception("Prediction API returned ${res.statusCode}");
-      }
-
-      final decoded = json.decode(res.body) as Map<String, dynamic>;
-
-      final dynamic tRaw = decoded["predicted_temperature"];
-      double? temperature =
-          tRaw is num ? tRaw.toDouble() : double.tryParse(tRaw.toString());
-
-      final dynamic tsRaw = decoded["predicted_timestamp"];
-      final DateTime? timestamp =
-          tsRaw != null ? DateTime.tryParse(tsRaw.toString()) : null;
-
+    if (res.statusCode == 404) {
       setState(() {
-        _forecastValue = temperature;
-        _forecastTimestamp = timestamp;
+        _forecastValue = null;
+        _forecastTimestamp = null;
         _loadingForecast = false;
+        _forecastError = "No prediction available";
       });
-    } catch (e) {
-      setState(() {
-        _loadingForecast = false;
-        _forecastError = e.toString();
-      });
+      return;
     }
+
+    if (res.statusCode != 200) {
+      throw Exception("Prediction API returned ${res.statusCode}");
+    }
+
+    final decoded = json.decode(res.body) as Map<String, dynamic>;
+
+    final dynamic tRaw = decoded["predicted_temperature"];
+    final double? temperature =
+        tRaw is num ? tRaw.toDouble() : double.tryParse("$tRaw");
+
+    final dynamic tsRaw = decoded["predicted_timestamp"];
+    final DateTime? timestamp =
+        tsRaw != null ? DateTime.tryParse(tsRaw.toString()) : null;
+
+    setState(() {
+      _forecastValue = temperature;
+      _forecastTimestamp = timestamp;
+      _loadingForecast = false;
+    });
+  } catch (e) {
+    setState(() {
+      _loadingForecast = false;
+      _forecastError = e.toString();
+    });
   }
+}
+
+Future<void> _fetchOpenMeteo(double lat, double lng) async {
+  setState(() {
+    _loadingMeteo = true;
+    _meteoError = null;
+  });
+
+  try {
+    final uri = Uri.parse(
+      'https://api.open-meteo.com/v1/forecast'
+      '?latitude=$lat'
+      '&longitude=$lng'
+      '&current=temperature_2m,relative_humidity_2m,precipitation,surface_pressure'
+      '&timezone=auto',
+    );
+
+    final res = await http.get(uri);
+
+    if (res.statusCode != 200) {
+      throw Exception('Open-Meteo returned ${res.statusCode}');
+    }
+
+    final decoded = json.decode(res.body);
+    final current = decoded['current'];
+
+    setState(() {
+      _meteoTemp = (current['temperature_2m'] as num?)?.toDouble();
+      _meteoHumidity =
+          (current['relative_humidity_2m'] as num?)?.toDouble();
+      _meteoRain = (current['precipitation'] as num?)?.toDouble();
+      _meteoPressure =
+          (current['surface_pressure'] as num?)?.toDouble();
+      _loadingMeteo = false;
+    });
+  } catch (e) {
+    setState(() {
+      _loadingMeteo = false;
+      _meteoError = e.toString();
+    });
+  }
+}
+
+
 
   // 🔹 Only logic change here previously was MapController.
   // Now we just update selection & forecast; map will refocus via key in _buildMap.
@@ -199,7 +259,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     setState(() {
       _selected = node;
     });
-    await _fetchForecast(node.nodeName);
+    await _fetchForecastById(
+  node.nodeId,
+  node.siteId,
+);
+await _fetchOpenMeteo(node.lat, node.lng);
   }
 
   String _formatTimestamp(DateTime? ts) {
@@ -435,33 +499,46 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         physics: const NeverScrollableScrollPhysics(),
         children: [
           MetricCard(
-            title: "Temperature",
-            value: node?.temperature != null
-                ? "${node!.temperature!.toStringAsFixed(1)}°C"
-                : "--",
-            icon: Icons.thermostat_outlined,
-            showTrend: false,
-          ),
-          MetricCard(
-            title: "Humidity",
-            value: node?.humidity != null
-                ? "${node!.humidity!.toStringAsFixed(1)}%"
-                : "--",
-            icon: Icons.water_drop_outlined,
-            showTrend: false,
-          ),
-          const MetricCard(
-            title: "Air Pressure",
-            value: "--",
-            icon: Icons.air_outlined,
-            showTrend: false,
-          ),
-          const MetricCard(
-            title: "Rain (1 min)",
-            value: "--",
-            icon: Icons.cloudy_snowing,
-            showTrend: false,
-          ),
+  title: "Temperature",
+  value: _loadingMeteo
+      ? "Loading…"
+      : _meteoTemp != null
+          ? "${_meteoTemp!.toStringAsFixed(1)}°C"
+          : "--",
+  icon: Icons.thermostat_outlined,
+  showTrend: false,
+),
+MetricCard(
+  title: "Humidity",
+  value: _loadingMeteo
+      ? "Loading…"
+      : _meteoHumidity != null
+          ? "${_meteoHumidity!.toStringAsFixed(1)}%"
+          : "--",
+  icon: Icons.water_drop_outlined,
+  showTrend: false,
+),
+MetricCard(
+  title: "Air Pressure",
+  value: _loadingMeteo
+      ? "Loading…"
+      : _meteoPressure != null
+          ? "${_meteoPressure!.toStringAsFixed(0)} hPa"
+          : "--",
+  icon: Icons.air_outlined,
+  showTrend: false,
+),
+MetricCard(
+  title: "Rain (current)",
+  value: _loadingMeteo
+      ? "Loading…"
+      : _meteoRain != null
+          ? "${_meteoRain!.toStringAsFixed(1)} mm"
+          : "--",
+  icon: Icons.cloudy_snowing,
+  showTrend: false,
+),
+
         ],
       ),
     );
@@ -494,7 +571,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
     }
 
     return _SectionContainer(
-      title: "Risk in your area",
+      title: "Risk in this area",
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -580,41 +657,82 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 
   Widget _buildMap() {
-    if (_selected == null) {
-      return const Center(child: Text("No nodes available"));
-    }
+  if (_selected == null) {
+    return const Center(child: Text("No nodes available"));
+  }
 
-    final center = LatLng(_selected!.lat, _selected!.lng);
+  final center = LatLng(_selected!.lat, _selected!.lng);
 
-    return FlutterMap(
-      // 🔹 Key forces FlutterMap to fully rebuild
-      key: ValueKey('${_selected!.nodeId}_${_selected!.lat}_${_selected!.lng}'),
-      options: MapOptions(
-        initialCenter: center,
-        initialZoom: 16,
+  return FlutterMap(
+    // 🔹 Forces rebuild when node changes (same as mobile)
+    key: ValueKey('admin-map-${_selected!.nodeId}_${_selected!.lat}_${_selected!.lng}'),
+    options: MapOptions(
+      initialCenter: center,
+      initialZoom: 16,
+    ),
+    children: [
+      // ─────────────────────────────────────
+      // BASE MAP — OpenStreetMap
+      // ─────────────────────────────────────
+      TileLayer(
+        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+        userAgentPackageName: 'com.example.floodwatch_desktop',
       ),
-      children: [
-        TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+
+      // ─────────────────────────────────────
+      // ELEVATION / HILLSHADE — OpenTopoMap
+      // ─────────────────────────────────────
+      Opacity(
+        opacity: 0.45, // low-effort elevation trick ✔
+        child: TileLayer(
+          urlTemplate: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+          subdomains: const ['a', 'b', 'c'],
           userAgentPackageName: 'com.example.floodwatch_desktop',
         ),
-        MarkerLayer(
-          markers: [
-            Marker(
-              point: center,
-              width: 40,
-              height: 40,
-              child: const Icon(
-                Icons.location_on,
-                size: 36,
-                color: Colors.red,
-              ),
-            ),
-          ],
+      ),
+
+      // ─────────────────────────────────────
+      // FLOOD SUSCEPTIBILITY — ArcGIS (MGB)
+      // ─────────────────────────────────────
+      Opacity(
+        opacity: 0.6,
+        child: TileLayer(
+          urlTemplate:
+              'https://controlmap.mgb.gov.ph/arcgis/rest/services/'
+              'GeospatialDataInventory/GDI_Detailed_Flood_Susceptibility/'
+              'MapServer/tile/{z}/{y}/{x}',
+          userAgentPackageName: 'com.example.floodwatch_desktop',
         ),
-      ],
-    );
-  }
+      ),
+
+      // ─────────────────────────────────────
+      // MARKER (rotation-safe, future-proof)
+      // ─────────────────────────────────────
+      MarkerLayer(
+        markers: [
+          Marker(
+            point: center,
+            width: 40,
+            height: 40,
+            child: Builder(
+              builder: (context) {
+                final rotation = MapCamera.of(context).rotationRad;
+                return Transform.rotate(
+                  angle: -rotation,
+                  child: const Icon(
+                    Icons.location_on,
+                    size: 36,
+                    color: Colors.red,
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    ],
+  );
+}
 }
 
 // ===========================================================================
