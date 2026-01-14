@@ -39,14 +39,13 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   Timer? _clockTimer;
   DateTime _now = DateTime.now();
 
+  double? _meteoTemp;
+  double? _meteoHumidity;
+  double? _meteoRain;
+  double? _meteoPressure;
 
-double? _meteoTemp;
-double? _meteoHumidity;
-double? _meteoRain;
-double? _meteoPressure;
-
-bool _loadingMeteo = false;
-String? _meteoError;
+  bool _loadingMeteo = false;
+  String? _meteoError;
 
   @override
   void initState() {
@@ -104,11 +103,8 @@ String? _meteoError;
       });
 
       if (_selected != null) {
-        await _fetchForecastById(
-  _selected!.nodeId,
-  _selected!.siteId,
-);
-await _fetchOpenMeteo(_selected!.lat, _selected!.lng);
+        await _fetchForecastById(_selected!.nodeId, _selected!.siteId);
+        await _fetchOpenMeteo(_selected!.lat, _selected!.lng);
       }
     } catch (e) {
       setState(() {
@@ -146,10 +142,7 @@ await _fetchOpenMeteo(_selected!.lat, _selected!.lng);
       });
 
       if (_selected != null) {
-        await _fetchForecastById(
-  _selected!.nodeId,
-  _selected!.siteId,
-);
+        await _fetchForecastById(_selected!.nodeId, _selected!.siteId);
       }
     } catch (_) {
       // silent fail
@@ -161,97 +154,95 @@ await _fetchOpenMeteo(_selected!.lat, _selected!.lng);
   // --------------------------------------------------------------------------
 
   Future<void> _fetchForecastById(int nodeId, int siteId) async {
-  setState(() {
-    _loadingForecast = true;
-    _forecastError = null;
-  });
+    setState(() {
+      _loadingForecast = true;
+      _forecastError = null;
+    });
 
-  try {
-    final uri = Uri.parse(
-      "$_apiBaseUrl/node/id/$nodeId/prediction?site_id=$siteId",
-    );
+    try {
+      final uri = Uri.parse(
+        "$_apiBaseUrl/node/id/$nodeId/prediction?site_id=$siteId",
+      );
 
-    final res = await http.get(uri);
+      final res = await http.get(uri);
 
-    if (res.statusCode == 404) {
+      if (res.statusCode == 404) {
+        setState(() {
+          _forecastValue = null;
+          _forecastTimestamp = null;
+          _loadingForecast = false;
+          _forecastError = "No prediction available";
+        });
+        return;
+      }
+
+      if (res.statusCode != 200) {
+        throw Exception("Prediction API returned ${res.statusCode}");
+      }
+
+      final decoded = json.decode(res.body) as Map<String, dynamic>;
+
+      final dynamic tRaw = decoded["predicted_temperature"];
+      final double? temperature = tRaw is num
+          ? tRaw.toDouble()
+          : double.tryParse("$tRaw");
+
+      final dynamic tsRaw = decoded["predicted_timestamp"];
+      final DateTime? timestamp = tsRaw != null
+          ? DateTime.tryParse(tsRaw.toString())
+          : null;
+
       setState(() {
-        _forecastValue = null;
-        _forecastTimestamp = null;
+        _forecastValue = temperature;
+        _forecastTimestamp = timestamp;
         _loadingForecast = false;
-        _forecastError = "No prediction available";
       });
-      return;
+    } catch (e) {
+      setState(() {
+        _loadingForecast = false;
+        _forecastError = e.toString();
+      });
     }
-
-    if (res.statusCode != 200) {
-      throw Exception("Prediction API returned ${res.statusCode}");
-    }
-
-    final decoded = json.decode(res.body) as Map<String, dynamic>;
-
-    final dynamic tRaw = decoded["predicted_temperature"];
-    final double? temperature =
-        tRaw is num ? tRaw.toDouble() : double.tryParse("$tRaw");
-
-    final dynamic tsRaw = decoded["predicted_timestamp"];
-    final DateTime? timestamp =
-        tsRaw != null ? DateTime.tryParse(tsRaw.toString()) : null;
-
-    setState(() {
-      _forecastValue = temperature;
-      _forecastTimestamp = timestamp;
-      _loadingForecast = false;
-    });
-  } catch (e) {
-    setState(() {
-      _loadingForecast = false;
-      _forecastError = e.toString();
-    });
   }
-}
 
-Future<void> _fetchOpenMeteo(double lat, double lng) async {
-  setState(() {
-    _loadingMeteo = true;
-    _meteoError = null;
-  });
+  Future<void> _fetchOpenMeteo(double lat, double lng) async {
+    setState(() {
+      _loadingMeteo = true;
+      _meteoError = null;
+    });
 
-  try {
-    final uri = Uri.parse(
-      'https://api.open-meteo.com/v1/forecast'
-      '?latitude=$lat'
-      '&longitude=$lng'
-      '&current=temperature_2m,relative_humidity_2m,precipitation,surface_pressure'
-      '&timezone=auto',
-    );
+    try {
+      final uri = Uri.parse(
+        'https://api.open-meteo.com/v1/forecast'
+        '?latitude=$lat'
+        '&longitude=$lng'
+        '&current=temperature_2m,relative_humidity_2m,precipitation,surface_pressure'
+        '&timezone=auto',
+      );
 
-    final res = await http.get(uri);
+      final res = await http.get(uri);
 
-    if (res.statusCode != 200) {
-      throw Exception('Open-Meteo returned ${res.statusCode}');
+      if (res.statusCode != 200) {
+        throw Exception('Open-Meteo returned ${res.statusCode}');
+      }
+
+      final decoded = json.decode(res.body);
+      final current = decoded['current'];
+
+      setState(() {
+        _meteoTemp = (current['temperature_2m'] as num?)?.toDouble();
+        _meteoHumidity = (current['relative_humidity_2m'] as num?)?.toDouble();
+        _meteoRain = (current['precipitation'] as num?)?.toDouble();
+        _meteoPressure = (current['surface_pressure'] as num?)?.toDouble();
+        _loadingMeteo = false;
+      });
+    } catch (e) {
+      setState(() {
+        _loadingMeteo = false;
+        _meteoError = e.toString();
+      });
     }
-
-    final decoded = json.decode(res.body);
-    final current = decoded['current'];
-
-    setState(() {
-      _meteoTemp = (current['temperature_2m'] as num?)?.toDouble();
-      _meteoHumidity =
-          (current['relative_humidity_2m'] as num?)?.toDouble();
-      _meteoRain = (current['precipitation'] as num?)?.toDouble();
-      _meteoPressure =
-          (current['surface_pressure'] as num?)?.toDouble();
-      _loadingMeteo = false;
-    });
-  } catch (e) {
-    setState(() {
-      _loadingMeteo = false;
-      _meteoError = e.toString();
-    });
   }
-}
-
-
 
   // 🔹 Only logic change here previously was MapController.
   // Now we just update selection & forecast; map will refocus via key in _buildMap.
@@ -259,11 +250,8 @@ Future<void> _fetchOpenMeteo(double lat, double lng) async {
     setState(() {
       _selected = node;
     });
-    await _fetchForecastById(
-  node.nodeId,
-  node.siteId,
-);
-await _fetchOpenMeteo(node.lat, node.lng);
+    await _fetchForecastById(node.nodeId, node.siteId);
+    await _fetchOpenMeteo(node.lat, node.lng);
   }
 
   String _formatTimestamp(DateTime? ts) {
@@ -410,17 +398,13 @@ await _fetchOpenMeteo(node.lat, node.lng);
           // status line (icon + forecast status)
           Row(
             children: [
-              Icon(
-                Icons.schedule,
-                size: 21,
-                color: statusColor,
-              ),
+              Icon(Icons.schedule, size: 21, color: statusColor),
               const SizedBox(width: 4),
               Expanded(
                 child: Text(
                   statusText,
                   style: subtitleStyle?.copyWith(
-                    fontSize: 15,   // <--- change font size here
+                    fontSize: 15, // <--- change font size here
                     color: statusColor,
                   ),
                   overflow: TextOverflow.ellipsis,
@@ -435,7 +419,7 @@ await _fetchOpenMeteo(node.lat, node.lng);
           Text(
             clockText,
             style: subtitleStyle?.copyWith(
-              fontSize: 15,   // <--- adjust as you like
+              fontSize: 15, // <--- adjust as you like
               color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
             ),
           ),
@@ -448,8 +432,9 @@ await _fetchOpenMeteo(node.lat, node.lng);
               Expanded(
                 child: MetricCard(
                   title: "Current Water Level",
-                  value:
-                      current != null ? "${current.toStringAsFixed(2)} m" : "--",
+                  value: current != null
+                      ? "${current.toStringAsFixed(2)} m"
+                      : "--",
                   icon: Icons.water_outlined,
                   showTrend: false,
                 ),
@@ -499,46 +484,45 @@ await _fetchOpenMeteo(node.lat, node.lng);
         physics: const NeverScrollableScrollPhysics(),
         children: [
           MetricCard(
-  title: "Temperature",
-  value: _loadingMeteo
-      ? "Loading…"
-      : _meteoTemp != null
-          ? "${_meteoTemp!.toStringAsFixed(1)}°C"
-          : "--",
-  icon: Icons.thermostat_outlined,
-  showTrend: false,
-),
-MetricCard(
-  title: "Humidity",
-  value: _loadingMeteo
-      ? "Loading…"
-      : _meteoHumidity != null
-          ? "${_meteoHumidity!.toStringAsFixed(1)}%"
-          : "--",
-  icon: Icons.water_drop_outlined,
-  showTrend: false,
-),
-MetricCard(
-  title: "Air Pressure",
-  value: _loadingMeteo
-      ? "Loading…"
-      : _meteoPressure != null
-          ? "${_meteoPressure!.toStringAsFixed(0)} hPa"
-          : "--",
-  icon: Icons.air_outlined,
-  showTrend: false,
-),
-MetricCard(
-  title: "Rain (current)",
-  value: _loadingMeteo
-      ? "Loading…"
-      : _meteoRain != null
-          ? "${_meteoRain!.toStringAsFixed(1)} mm"
-          : "--",
-  icon: Icons.cloudy_snowing,
-  showTrend: false,
-),
-
+            title: "Temperature",
+            value: _loadingMeteo
+                ? "Loading…"
+                : _meteoTemp != null
+                ? "${_meteoTemp!.toStringAsFixed(1)}°C"
+                : "--",
+            icon: Icons.thermostat_outlined,
+            showTrend: false,
+          ),
+          MetricCard(
+            title: "Humidity",
+            value: _loadingMeteo
+                ? "Loading…"
+                : _meteoHumidity != null
+                ? "${_meteoHumidity!.toStringAsFixed(1)}%"
+                : "--",
+            icon: Icons.water_drop_outlined,
+            showTrend: false,
+          ),
+          MetricCard(
+            title: "Air Pressure",
+            value: _loadingMeteo
+                ? "Loading…"
+                : _meteoPressure != null
+                ? "${_meteoPressure!.toStringAsFixed(0)} hPa"
+                : "--",
+            icon: Icons.air_outlined,
+            showTrend: false,
+          ),
+          MetricCard(
+            title: "Rain (current)",
+            value: _loadingMeteo
+                ? "Loading…"
+                : _meteoRain != null
+                ? "${_meteoRain!.toStringAsFixed(1)} mm"
+                : "--",
+            icon: Icons.cloudy_snowing,
+            showTrend: false,
+          ),
         ],
       ),
     );
@@ -593,10 +577,9 @@ MetricCard(
                   height: 32,
                   padding: const EdgeInsets.symmetric(horizontal: 10),
                   decoration: BoxDecoration(
-                    color: Theme.of(context)
-                        .colorScheme
-                        .surfaceVariant
-                        .withOpacity(0.35),
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.surfaceVariant.withOpacity(0.35),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: DropdownButtonHideUnderline(
@@ -625,8 +608,10 @@ MetricCard(
               ),
               const Spacer(),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 6,
+                ),
                 decoration: BoxDecoration(
                   color: riskColor.withOpacity(0.15),
                   borderRadius: BorderRadius.circular(20),
@@ -643,96 +628,94 @@ MetricCard(
           ),
 
           // const SizedBox(height: 30),
-
           SizedBox(
-  height: 595, // <-- adjust as needed
-  child: ClipRRect(
-    borderRadius: BorderRadius.circular(16),
-    child: _buildMap(),
-  ),
-),
+            height: 595, // <-- adjust as needed
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: _buildMap(),
+            ),
+          ),
         ],
       ),
     );
   }
 
   Widget _buildMap() {
-  if (_selected == null) {
-    return const Center(child: Text("No nodes available"));
-  }
+    if (_selected == null) {
+      return const Center(child: Text("No nodes available"));
+    }
 
-  final center = LatLng(_selected!.lat, _selected!.lng);
+    final center = LatLng(_selected!.lat, _selected!.lng);
 
-  return FlutterMap(
-    // 🔹 Forces rebuild when node changes (same as mobile)
-    key: ValueKey('admin-map-${_selected!.nodeId}_${_selected!.lat}_${_selected!.lng}'),
-    options: MapOptions(
-      initialCenter: center,
-      initialZoom: 16,
-    ),
-    children: [
-      // ─────────────────────────────────────
-      // BASE MAP — OpenStreetMap
-      // ─────────────────────────────────────
-      TileLayer(
-        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-        userAgentPackageName: 'com.example.floodwatch_desktop',
+    return FlutterMap(
+      // 🔹 Forces rebuild when node changes (same as mobile)
+      key: ValueKey(
+        'admin-map-${_selected!.nodeId}_${_selected!.lat}_${_selected!.lng}',
       ),
-
-      // ─────────────────────────────────────
-      // ELEVATION / HILLSHADE — OpenTopoMap
-      // ─────────────────────────────────────
-      Opacity(
-        opacity: 0.45, // low-effort elevation trick ✔
-        child: TileLayer(
-          urlTemplate: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
-          subdomains: const ['a', 'b', 'c'],
+      options: MapOptions(initialCenter: center, initialZoom: 16),
+      children: [
+        // ─────────────────────────────────────
+        // BASE MAP — OpenStreetMap
+        // ─────────────────────────────────────
+        TileLayer(
+          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
           userAgentPackageName: 'com.example.floodwatch_desktop',
         ),
-      ),
 
-      // ─────────────────────────────────────
-      // FLOOD SUSCEPTIBILITY — ArcGIS (MGB)
-      // ─────────────────────────────────────
-      Opacity(
-        opacity: 0.6,
-        child: TileLayer(
-          urlTemplate:
-              'https://controlmap.mgb.gov.ph/arcgis/rest/services/'
-              'GeospatialDataInventory/GDI_Detailed_Flood_Susceptibility/'
-              'MapServer/tile/{z}/{y}/{x}',
-          userAgentPackageName: 'com.example.floodwatch_desktop',
-        ),
-      ),
-
-      // ─────────────────────────────────────
-      // MARKER (rotation-safe, future-proof)
-      // ─────────────────────────────────────
-      MarkerLayer(
-        markers: [
-          Marker(
-            point: center,
-            width: 40,
-            height: 40,
-            child: Builder(
-              builder: (context) {
-                final rotation = MapCamera.of(context).rotationRad;
-                return Transform.rotate(
-                  angle: -rotation,
-                  child: const Icon(
-                    Icons.location_on,
-                    size: 36,
-                    color: Colors.red,
-                  ),
-                );
-              },
-            ),
+        // ─────────────────────────────────────
+        // ELEVATION / HILLSHADE — OpenTopoMap
+        // ─────────────────────────────────────
+        Opacity(
+          opacity: 0.45, // low-effort elevation trick ✔
+          child: TileLayer(
+            urlTemplate: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+            subdomains: const ['a', 'b', 'c'],
+            userAgentPackageName: 'com.example.floodwatch_desktop',
           ),
-        ],
-      ),
-    ],
-  );
-}
+        ),
+
+        // ─────────────────────────────────────
+        // FLOOD SUSCEPTIBILITY — ArcGIS (MGB)
+        // ─────────────────────────────────────
+        Opacity(
+          opacity: 0.6,
+          child: TileLayer(
+            urlTemplate:
+                'https://controlmap.mgb.gov.ph/arcgis/rest/services/'
+                'GeospatialDataInventory/GDI_Detailed_Flood_Susceptibility/'
+                'MapServer/tile/{z}/{y}/{x}',
+            userAgentPackageName: 'com.example.floodwatch_desktop',
+          ),
+        ),
+
+        // ─────────────────────────────────────
+        // MARKER (rotation-safe, future-proof)
+        // ─────────────────────────────────────
+        MarkerLayer(
+          markers: [
+            Marker(
+              point: center,
+              width: 40,
+              height: 40,
+              child: Builder(
+                builder: (context) {
+                  final rotation = MapCamera.of(context).rotationRad;
+                  return Transform.rotate(
+                    angle: -rotation,
+                    child: const Icon(
+                      Icons.location_on,
+                      size: 36,
+                      color: Colors.red,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
 }
 
 // ===========================================================================
@@ -831,10 +814,7 @@ class _SectionContainer extends StatelessWidget {
   final String title;
   final Widget child;
 
-  const _SectionContainer({
-    required this.title,
-    required this.child,
-  });
+  const _SectionContainer({required this.title, required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -847,9 +827,7 @@ class _SectionContainer extends StatelessWidget {
 
     return Card(
       color: outerColor,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(18),
-      ),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       elevation: 0,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
@@ -858,9 +836,9 @@ class _SectionContainer extends StatelessWidget {
           children: [
             Text(
               title,
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 12),
             child,
